@@ -14,6 +14,12 @@ Export a JSON backup from Reports and save it somewhere private, such as iCloud 
 
 The new app imports the previous `ipurchase_data` browser records once into the versioned `ipurchase_v2` store, leaving the original key untouched. Existing combined accessory totals remain combined, and missing balance acquisition costs remain unknown. Export a backup before updating. The old `Index.html` is retained for recovery, but changes made there after migration will not sync to the new app. Migration only works on the same origin and browser where the old data was saved.
 
+## Planner and cash in hand
+
+The planner shows live item and payment totals. Enter Apple ID balances and choose cash or a card to cover the remainder, or select manual split. Quantity, colour, storage and accessory refund details are available on each item. Accessory expected refunds default to the line price until edited.
+
+Count and set cash in hand at the start of each day. The displayed balance subtracts cash purchases saved after that count and adds cash refunds completed from the planner after that count; changing the count starts again from that moment. Earlier records, other expenses, and refunds recorded elsewhere without a confirmed cash method are not included. Deleting a transaction also removes its associated movements. A new count is needed each day. The accessory count excludes whole lines marked returned or fully refunded; partial refunds do not change the quantity in hand. Completing a planner refund records the full outstanding amount as cash and marks the whole line returned. Both timers run independently while the page is open; only the first timer is saved with a purchase.
+
 ## Invoice privacy and limitations
 
 Invoice files stay in browser storage. Image OCR uses the existing Tesseract.js 5 CDN dependency and downloads its software and English language data only after confirmation; it processes the selected image locally. Internet access is needed for the download. PDF attachment and manual verification are supported, but PDF OCR is not implemented. Barcode/QR detection uses the browser's optional `BarcodeDetector` API and may not be available in iPhone Safari. Decoded values are not assumed to be invoice details. OCR suggestions can be incorrect and require manual review. Only the invoice total is compared automatically; product matching is a manual confirmation. Invoice approval never changes the original purchase plan.

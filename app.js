@@ -43,6 +43,7 @@
   function validateData(d) {
     if (!d || d.version !== 2 || !Array.isArray(d.transactions) || !Array.isArray(d.expenses)) throw Error('Unsupported or invalid backup format.');
     const amount = n => Number.isSafeInteger(n) && n >= 0;
+    if (d.cashCount && (!amount(d.cashCount.amount) || typeof d.cashCount.date !== 'string' || isNaN(Date.parse(d.cashCount.date)))) throw Error('Invalid cash count in backup.');
     const ids = new Set();
     for (const t of d.transactions) {
       if (!t || typeof t.id !== 'string' || ids.has(t.id) || typeof t.date !== 'string' || isNaN(Date.parse(t.date)) || !Array.isArray(t.phones) || !Array.isArray(t.accessories) || !Array.isArray(t.sources) || !t.invoice || typeof t.invoice !== 'object' ||
@@ -77,16 +78,26 @@
     window.scrollTo(0,0);
   }
   document.querySelector('nav').addEventListener('click', e => { const b=e.target.closest('button[data-tab]'); if(b) switchTab(b.dataset.tab); });
-  const phoneTemplate = () => `<div class="item"><div class="fields"><label>Model<input class="model" list="models" required placeholder="iPhone model"></label><label>Colour<input class="colour" required></label><label>Storage<input class="storage" required placeholder="256 GB"></label><label>Quantity<input class="qty" type="number" min="1" step="1" value="1" required></label><label>Unit price (£)<input class="price" type="number" min="0" step="0.01" required></label></div><div class="lineTotal hint"></div><button type="button" class="secondary danger remove">Remove</button></div>`;
-  const accessoryTemplate = () => `<div class="item"><div class="fields"><label>Product name<input class="name" required></label><label>Quantity<input class="qty" type="number" min="1" step="1" value="1" required></label><label>Unit price (£)<input class="price" type="number" min="0" step="0.01" required></label><label>Expected refund (£)<input class="expected" type="number" min="0" step="0.01" value="0" required></label><label>Return status<select class="status"><option>Not yet returned</option><option>Awaiting return</option><option>Not refundable</option></select></label></div><div class="lineTotal hint"></div><button type="button" class="secondary danger remove">Remove</button></div>`;
-  const sourceTemplate = () => `<div class="item"><div class="fields"><label>Face value (£)<input class="face" type="number" min="0" step="0.01" value="0" required></label><label>Acquisition rate (%) — blank if unknown<input class="rate" type="number" min="0" max="100" step="0.01" value="85"></label></div><div class="lineTotal hint"></div><button type="button" class="secondary danger remove">Remove</button></div>`;
+  const phoneTemplate = () => `<div class="item"><div class="compact-row"><label>iPhone model<input class="model" list="models" required placeholder="Model"></label><label>Unit price (£)<input class="price" type="number" min="0" step="0.01" required></label><button type="button" class="secondary danger remove" aria-label="Remove iPhone">×</button></div><details><summary>Quantity, colour and storage</summary><div class="fields"><label>Quantity<input class="qty" type="number" min="1" step="1" value="1" required></label><label>Colour<input class="colour"></label><label>Storage<input class="storage" placeholder="256 GB"></label></div></details><div class="lineTotal hint"></div></div>`;
+  const accessoryTemplate = () => `<div class="item"><div class="compact-row"><label>Accessory<input class="name" required placeholder="Product"></label><label>Unit price (£)<input class="price" type="number" min="0" step="0.01" required></label><button type="button" class="secondary danger remove" aria-label="Remove accessory">×</button></div><details><summary>Quantity and refund details</summary><div class="fields"><label>Quantity<input class="qty" type="number" min="1" step="1" value="1" required></label><label>Expected refund (£)<input class="expected" type="number" min="0" step="0.01" value="0" required></label><label>Return status<select class="status"><option>Not yet returned</option><option>Awaiting return</option><option>Not refundable</option></select></label></div></details><div class="lineTotal hint"></div></div>`;
+  const sourceTemplate = () => `<div class="item"><div class="compact-row"><label>Apple ID balance (£)<input class="face" type="number" min="0" step="0.01" value="0" required></label><label>Acquisition rate (%)<input class="rate" type="number" min="0" max="100" step="0.01" value="85"></label><button type="button" class="secondary danger remove" aria-label="Remove balance">×</button></div><div class="lineTotal hint"></div></div>`;
   $('phones').insertAdjacentHTML('beforebegin','<datalist id="models"><option value="iPhone 18 Pro"><option value="iPhone 18 Pro Max"><option value="iPhone 18"><option value="iPhone Air"></datalist>');
   const add = (container, template) => { $(container).insertAdjacentHTML('beforeend',template()); updatePlanner(); };
   $('addPhone').onclick=()=>add('phones',phoneTemplate);
   $('addAccessory').onclick=()=>add('accessories',accessoryTemplate);
   $('addSource').onclick=()=>add('sources',sourceTemplate);
   $('purchaseForm').addEventListener('click',e=>{ if(e.target.classList.contains('remove')) {e.target.closest('.item').remove(); updatePlanner();} });
-  $('purchaseForm').addEventListener('input',updatePlanner);
+  $('purchaseForm').addEventListener('input',e=>{
+    const row=e.target.closest('#accessories .item');
+    if(row) {
+      if(e.target.classList.contains('expected')) row.dataset.refundEdited='yes';
+      if(e.target.classList.contains('status') && e.target.value==='Not refundable') row.querySelector('.expected').value='0';
+      else if(row.querySelector('.status').value!=='Not refundable' && !row.dataset.refundEdited && (e.target.classList.contains('price') || e.target.classList.contains('qty') || e.target.classList.contains('status'))) {
+        try { const qty=Number(row.querySelector('.qty').value); if(Number.isSafeInteger(qty)&&qty>0) row.querySelector('.expected').value=pounds(pence(row.querySelector('.price').value)*qty); } catch(err) {}
+      }
+    }
+    updatePlanner();
+  });
   function readPlanner() {
     const q = (el, cls) => el.querySelector('.'+cls).value.trim();
     const rows = id => [...$(id).querySelectorAll('.item')];
@@ -104,6 +115,17 @@
     return {phone,accessory,face,unknown,cost,saving,refunds,payments,total,profit:saving+t.extra+t.commission-t.purchaseExpense, outflow:cost+t.cash+t.debit+t.credit-refunds};
   }
   function updatePlanner() {
+    const rows = id => [...$(id).querySelectorAll('.item')];
+    const safeAmount = value => { try { return value === '' ? 0 : pence(value); } catch(e) { return 0; } };
+    const itemTotal = id => sum(rows(id),el=>{const qty=Number(el.querySelector('.qty').value);return Number.isSafeInteger(qty)&&qty>0&&qty<=10000 ? safeAmount(el.querySelector('.price').value)*qty : 0;});
+    const phone=itemTotal('phones'), accessory=itemTotal('accessories'), face=sum(rows('sources'),el=>safeAmount(el.querySelector('.face').value));
+    const auto=$('autoPayment').value;
+    ['cash','debit','credit'].forEach(key=>$(key).readOnly=key===auto);
+    if(auto) {
+      const other=sum(['cash','debit','credit'].filter(key=>key!==auto),key=>safeAmount($(key).value));
+      $(auto).value=pounds(Math.max(0,phone+accessory-face-other));
+    }
+    $('plannerTotals').innerHTML=metric('iPhones',money(phone))+metric('Accessories',money(accessory))+metric('Total',money(phone+accessory))+metric('Apple ID',money(face))+metric('Cash',money(safeAmount($('cash').value)))+metric('Card',money(safeAmount($('debit').value)+safeAmount($('credit').value)));
     try {
       const t=readPlanner(), f=figures(t);
       $('breakdown').innerHTML=line('iPhones',money(f.phone))+line('Accessories',money(f.accessory))+line('Invoice total',money(f.total))+line('Apple Account face value',money(f.face))+line('Cash',money(t.cash))+line('Card payments',money(t.debit+t.credit))+line('Total payments',money(f.payments))+line('Invoice less payments',money(f.total-f.payments),f.total!==f.payments?'warning':'good')+line('Acquisition cost',f.unknown?'Incomplete — unknown cost':money(f.cost))+line('Acquisition savings',f.unknown?'Incomplete — unknown cost':money(f.saving))+line('Extra non-refundable amount',money(t.extra))+line('Commission earned / outstanding',money(t.commission)+' / '+money(t.commission-t.commissionReceived))+line('Transaction expenses',money(t.purchaseExpense))+line('Estimated profit',f.unknown?'Incomplete — unknown cost':money(f.profit))+line('Expected accessory refunds',money(f.refunds))+line('Expected net outflow',f.unknown?'Incomplete — unknown cost':money(f.outflow));
@@ -115,27 +137,35 @@
       [...$('sources').querySelectorAll('.item')].forEach((el,i)=>{const s=t.sources[i];el.querySelector('.lineTotal').textContent=s.cost===null?'Acquisition cost and savings unknown':'Cost: '+money(s.cost)+' · Savings: '+money(s.face-s.cost);});
     } catch(e) { $('comparison').innerHTML=''; $('breakdown').textContent='Complete all amounts to see the breakdown. '+e.message; }
   }
-  let timerStart=null,timerElapsed=0,timerInterval=null;
-  const seconds=()=>Math.floor((timerElapsed+(timerStart ? Date.now()-timerStart : 0))/1000);
   const duration=s=>[Math.floor(s/3600),Math.floor(s%3600/60),s%60].map(n=>String(n).padStart(2,'0')).join(':');
-  const drawTimer=()=>{$('timer').textContent=duration(seconds());};
-  $('startTimer').onclick=()=>{if(!timerStart){timerStart=Date.now();timerInterval=setInterval(drawTimer,500);}};
-  $('stopTimer').onclick=()=>{if(timerStart){timerElapsed+=Date.now()-timerStart;timerStart=null;clearInterval(timerInterval);}drawTimer();};
-  $('resetTimer').onclick=()=>{timerStart=null;timerElapsed=0;clearInterval(timerInterval);drawTimer();};
+  function makeTimer(display,start,stop,reset) {
+    let started=null,elapsed=0,interval=null;
+    const seconds=()=>Math.floor((elapsed+(started!==null ? Date.now()-started : 0))/1000);
+    const draw=()=>{$(display).textContent=duration(seconds());};
+    $(start).onclick=()=>{if(started===null){started=Date.now();interval=setInterval(draw,500);draw();}};
+    $(stop).onclick=()=>{if(started!==null){elapsed+=Date.now()-started;started=null;clearInterval(interval);}draw();};
+    $(reset).onclick=()=>{started=null;elapsed=0;clearInterval(interval);draw();};
+    return seconds;
+  }
+  const seconds=makeTimer('timer','startTimer','stopTimer','resetTimer');
+  makeTimer('otherTimer','startOtherTimer','stopOtherTimer','resetOtherTimer');
+  const setPurchaseTime=()=>{const now=new Date();now.setMinutes(now.getMinutes()-now.getTimezoneOffset());$('purchaseTime').value=now.toISOString().slice(0,16);};
+  setPurchaseTime();
   let completedId=null;
   $('purchaseForm').onsubmit=e=>{
     e.preventDefault();
     try {
       const t=readPlanner(), f=figures(t);
-      if(!t.phones.length || t.phones.some(p=>!p.model||!p.colour||!p.storage)) throw Error('Add at least one iPhone with model, colour and storage.');
+      if(!t.phones.length || t.phones.some(p=>!p.model)) throw Error('Add at least one iPhone with a model.');
       if(t.accessories.some(a=>!a.name||a.expected>a.total||(a.status==='Not refundable'&&a.expected!==0))) throw Error('Check accessory names and expected refunds; non-refundable items must have a zero expected refund.');
       if(t.commissionReceived>t.commission) throw Error('Commission received cannot exceed commission earned.');
       if(f.total!==f.payments && !$('exception').checked) throw Error('Payments do not reconcile. Correct them or explicitly record an exception.');
       if(!confirm(`Complete purchase?\nInvoice: ${money(f.total)}\nPayments: ${money(f.payments)}\nDifference: ${money(f.total-f.payments)}\nEstimated profit: ${f.unknown?'Incomplete':money(f.profit)}${f.total!==f.payments?'\nPayment exception will be recorded.':''}`)) return;
-      Object.assign(t,{id:id(),date:new Date().toISOString(),total:f.total,exception:f.total!==f.payments,invoice:{ref:'',verification:'Awaiting verification'},duration:seconds()});
+      const purchaseDate=new Date($('purchaseTime').value);if(isNaN(purchaseDate.getTime())) throw Error('Enter a valid purchase time.');
+      Object.assign(t,{id:id(),date:purchaseDate.toISOString(),recordedAt:new Date().toISOString(),total:f.total,exception:f.total!==f.payments,invoice:{ref:'',verification:'Awaiting verification'},duration:seconds()});
       if(!change(d=>d.transactions.push(t))) return;
       completedId=t.id; $('completionMessage').textContent='Done with '+money(t.extra); $('completion').showModal();
-      e.target.reset(); $('phones').innerHTML='';$('accessories').innerHTML='';$('sources').innerHTML='';add('phones',phoneTemplate);add('sources',sourceTemplate);$('resetTimer').click(); updatePlanner();
+      e.target.reset(); setPurchaseTime(); $('phones').innerHTML='';$('accessories').innerHTML='';$('sources').innerHTML='';add('phones',phoneTemplate);add('sources',sourceTemplate);$('resetTimer').click(); updatePlanner();
     } catch(err){alert(err.message);}
   };
   async function copyText(text) {
@@ -190,7 +220,41 @@
     const durations=ts.map(t=>t.duration).filter(n=>Number.isFinite(n));
     $('timerStats').textContent=durations.length?'Last: '+duration(durations[durations.length-1])+(durations.length>1?' · Average: '+duration(Math.round(sum(durations,x=>x)/durations.length)):''):'No purchase sessions recorded yet.';
   }
-  function render(){renderTransactions();renderRefunds();renderReports();}
+  function renderDay() {
+    const ts=data.transactions, day=today(), count=data.cashCount;
+    const phones=sum(ts.filter(t=>localDate(t.date)===day),t=>sum(t.phones,p=>p.qty));
+    const accessories=ts.flatMap(t=>t.accessories.map(a=>({t,a})));
+    const inHand=sum(accessories.filter(({a})=>a.status!=='Returned, refund pending' && status(a)!=='Fully refunded'),x=>x.a.qty);
+    let cash='Not counted today';
+    if(count && localDate(count.date)===day) {
+      const after=date=>typeof date==='string' && !isNaN(Date.parse(date)) && Date.parse(date)>=Date.parse(count.date);
+      const spent=sum(ts.filter(t=>after(t.recordedAt)),t=>t.cash);
+      const returned=sum(accessories,x=>sum(x.a.refunds.filter(r=>r.method==='cash' && after(r.date)),r=>r.amount));
+      cash=money(count.amount-spent+returned);
+    }
+    $('dayStats').innerHTML=metric('iPhones purchased today',String(phones))+metric('Accessories in hand',String(inHand))+metric('Cash in hand',cash);
+    const select=$('refundAccessory'), selected=select.value;
+    const eligible=accessories.filter(({a})=>a.status!=='Not refundable' && outstanding(a)>0);
+    select.innerHTML='<option value="">Select an accessory</option>'+eligible.map(({t,a})=>`<option value="${esc(JSON.stringify([t.id,a.id]))}">${esc(a.name)} × ${a.qty} · ${esc(money(outstanding(a)))} · ${esc(new Date(t.date).toLocaleDateString('en-GB'))}</option>`).join('');
+    select.value=[...select.options].some(o=>o.value===selected)?selected:'';
+  }
+  $('saveOpening').onclick=()=>{
+    try {
+      const amount=pence($('openingCash').value);
+      if(data.cashCount && localDate(data.cashCount.date)===today() && !confirm('Replace today’s count with the cash you have counted now? Earlier movements will no longer be included.')) return;
+      if(change(d=>{d.cashCount={amount,date:new Date().toISOString()};})) $('openingCash').value='';
+    } catch(err){alert(err.message);}
+  };
+  $('completeRefund').onclick=()=>{
+    const selected=$('refundAccessory').value;
+    if(!selected){alert('Select an accessory to refund.');return;}
+    const [tid,aid]=JSON.parse(selected), t=data.transactions.find(x=>x.id===tid), a=t&&t.accessories.find(x=>x.id===aid);
+    if(!a || a.status==='Not refundable' || outstanding(a)<=0){alert('This refund is no longer available.');renderDay();return;}
+    const amount=outstanding(a);
+    if(!confirm('Record '+money(amount)+' received in cash and mark '+a.name+' returned?')) return;
+    change(d=>{const item=d.transactions.find(x=>x.id===tid).accessories.find(x=>x.id===aid);item.status='Returned, refund pending';item.returnDate=today();item.refunds.push({amount,date:new Date().toISOString(),method:'cash'});});
+  };
+  function render(){renderTransactions();renderRefunds();renderReports();renderDay();}
   ['search','filterDate','filterModel','filterRefund','filterVerification'].forEach(x=>$(x).addEventListener('input',renderTransactions));
   document.addEventListener('click',e=>{
     const b=e.target.closest('button[data-action]');if(!b)return;
@@ -286,5 +350,6 @@
       if(change(d=>{d.transactions.find(x=>x.id===invoiceId).invoice={ref,total,text:$('scanText').value,verification,productsVerified,file,fileName};})){$('invoiceDialog').close();$('notice').textContent='Invoice details approved. The original purchase plan was not changed.';}
     }catch(err){alert(err.message);}
   };
-  add('phones',phoneTemplate);add('sources',sourceTemplate);render();drawTimer();
+  add('phones',phoneTemplate);add('sources',sourceTemplate);render();
+  window.addEventListener('focus',renderDay);
 })();
