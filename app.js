@@ -46,7 +46,8 @@
     const ids = new Set();
     for (const t of d.transactions) {
       if (!t || typeof t.id !== 'string' || ids.has(t.id) || typeof t.date !== 'string' || isNaN(Date.parse(t.date)) || !Array.isArray(t.phones) || !Array.isArray(t.accessories) || !Array.isArray(t.sources) || !t.invoice || typeof t.invoice !== 'object' ||
-          ![t.total,t.cash,t.debit,t.credit,t.extra,t.commission,t.commissionReceived,t.purchaseExpense].every(amount) || t.commissionReceived > t.commission) throw Error('Invalid transaction in backup.');
+          ![t.total,t.cash,t.debit,t.credit,t.extra,t.commission,t.commissionReceived,t.purchaseExpense].every(amount) || t.commissionReceived > t.commission ||
+          (t.invoice.file && (typeof t.invoice.file !== 'string' || !/^data:(?:image\/[a-z0-9.+-]+|application\/pdf);base64,[a-z0-9+/=]+$/i.test(t.invoice.file)))) throw Error('Invalid transaction in backup.');
       ids.add(t.id);
       if (t.phones.some(p => !p || typeof p.model !== 'string' || !Number.isSafeInteger(p.qty) || p.qty < 1 || !amount(p.total)) ||
           t.sources.some(s => !s || !amount(s.face) || (s.cost !== null && !amount(s.cost))) ||
@@ -107,11 +108,12 @@
       const t=readPlanner(), f=figures(t);
       $('breakdown').innerHTML=line('iPhones',money(f.phone))+line('Accessories',money(f.accessory))+line('Invoice total',money(f.total))+line('Apple Account face value',money(f.face))+line('Cash',money(t.cash))+line('Card payments',money(t.debit+t.credit))+line('Total payments',money(f.payments))+line('Invoice less payments',money(f.total-f.payments),f.total!==f.payments?'warning':'good')+line('Acquisition cost',f.unknown?'Incomplete — unknown cost':money(f.cost))+line('Acquisition savings',f.unknown?'Incomplete — unknown cost':money(f.saving))+line('Extra non-refundable amount',money(t.extra))+line('Commission earned / outstanding',money(t.commission)+' / '+money(t.commission-t.commissionReceived))+line('Transaction expenses',money(t.purchaseExpense))+line('Estimated profit',f.unknown?'Incomplete — unknown cost':money(f.profit))+line('Expected accessory refunds',money(f.refunds))+line('Expected net outflow',f.unknown?'Incomplete — unknown cost':money(f.outflow));
       const source=t.sources[0];
-      $('comparison').innerHTML=source ? '<h4>Rate comparison for first source</h4>'+[80,85,90,95,100].map(r=>line(r+'%'+(source.rate===r*100?' (selected)':''),money(Math.round(source.face*r/100))+' cost · '+money(source.face-Math.round(source.face*r/100))+' saving'+(source.cost!==null?' · '+money((source.face-Math.round(source.face*r/100))-(source.face-source.cost))+' vs selected':''))).join(''):'';
+      const rates=[80,85,90,95,100];if(source&&source.rate!==null&&!rates.includes(source.rate/100))rates.push(source.rate/100);rates.sort((a,b)=>a-b);
+      $('comparison').innerHTML=source ? '<h4>Rate comparison for first source</h4>'+rates.map(r=>line(r+'%'+(source.rate===r*100?' (selected)':''),money(Math.round(source.face*r/100))+' cost · '+money(source.face-Math.round(source.face*r/100))+' saving'+(source.cost!==null?' · '+money((source.face-Math.round(source.face*r/100))-(source.face-source.cost))+' vs selected':''))).join(''):'';
       [...$('phones').querySelectorAll('.item')].forEach((el,i)=>el.querySelector('.lineTotal').textContent='Line total: '+money(t.phones[i].total));
       [...$('accessories').querySelectorAll('.item')].forEach((el,i)=>el.querySelector('.lineTotal').textContent='Line total: '+money(t.accessories[i].total));
       [...$('sources').querySelectorAll('.item')].forEach((el,i)=>{const s=t.sources[i];el.querySelector('.lineTotal').textContent=s.cost===null?'Acquisition cost and savings unknown':'Cost: '+money(s.cost)+' · Savings: '+money(s.face-s.cost);});
-    } catch(e) { $('breakdown').textContent='Complete all amounts to see the breakdown. '+e.message; }
+    } catch(e) { $('comparison').innerHTML=''; $('breakdown').textContent='Complete all amounts to see the breakdown. '+e.message; }
   }
   let timerStart=null,timerElapsed=0,timerInterval=null;
   const seconds=()=>Math.floor((timerElapsed+(timerStart ? Date.now()-timerStart : 0))/1000);
@@ -153,7 +155,7 @@
     return `<article class="item record"><h3>${esc(t.phones.map(p=>p.model+' × '+p.qty).join(', '))}</h3><p class="hint">Reference: ${esc(t.id)}<br>${esc(new Date(t.date).toLocaleString('en-GB'))} · ${esc(t.invoice.verification || 'Awaiting verification')}${t.exception?' · ⚠️ Payment exception':''}</p>
     ${t.phones.map(p=>line(p.model+' · '+p.colour+' · '+p.storage+' × '+p.qty,money(p.total))).join('')}
     ${line('Invoice total',money(t.total))}${line('Apple Account / cash / cards',money(f.face)+' / '+money(t.cash)+' / '+money(t.debit+t.credit))}${line('Expected / received refunds',money(f.refunds)+' / '+money(refund))}${line('Extra non-refundable amount',money(t.extra))}${line('Commission earned / received',money(t.commission)+' / '+money(t.commissionReceived))}${line('Estimated profit',f.unknown?'Incomplete — unknown acquisition cost':money(f.profit-linked))}${line('Actual profit','Unavailable — receipts not fully confirmed')}
-    <div class="actions">${action('invoice',t.id,'Verify / attach invoice')}${t.invoice.file?action('viewInvoice',t.id,'View attachment'):''}${t.commissionReceived<t.commission?action('commission',t.id,'Record commission received'):''}${action('delete',t.id,'Delete')}</div></article>`;
+    <div class="actions">${action('invoice',t.id,'Verify / attach invoice')}${t.invoice.file?action('viewInvoice',t.id,'View attachment'):''}${action('edit',t.id,'Edit earnings / balance costs')}${action('copy',t.id,'Copy message')}${t.commissionReceived<t.commission?action('commission',t.id,'Record commission received'):''}${action('delete',t.id,'Delete')}</div></article>`;
   }
   function renderTransactions() {
     const ts=data.transactions, td=today(), todays=ts.filter(t=>localDate(t.date)===td);
@@ -195,6 +197,19 @@
     const tid=b.dataset.id,t=data.transactions.find(x=>x.id===tid), a=t&&t.accessories.find(x=>x.id===b.dataset.accessory);
     if(b.dataset.action==='delete'){if(confirm('Delete this transaction and its refund history?'))change(d=>{d.transactions=d.transactions.filter(x=>x.id!==tid);});}
     if(b.dataset.action==='deleteExpense'){if(confirm('Delete this expense?'))change(d=>{d.expenses=d.expenses.filter(x=>x.id!==tid);});}
+    if(b.dataset.action==='copy'&&t){const text='Done with '+money(t.extra);copyText(text).then(ok=>{if(ok)alert('Message copied.');else prompt('Copy this message:',text);});}
+    if(b.dataset.action==='edit'&&t){
+      try{
+        const sources=structuredCopy(t.sources);
+        for(const s of sources){const rate=prompt('Acquisition rate (%) for '+money(s.face)+' face value. Leave blank if unknown.',s.rate===null?'':String(s.rate/100));if(rate===null)return;if(rate.trim()===''){s.rate=null;s.cost=null;}else{if(!/^\d+(?:\.\d{1,2})?$/.test(rate.trim())||Number(rate)>100)throw Error('Rate must be between 0 and 100%.');s.rate=Math.round(Number(rate)*100);s.cost=Math.round(s.face*s.rate/10000);}}
+        const extra=prompt('Extra non-refundable amount (£)',pounds(t.extra));if(extra===null)return;
+        const commission=prompt('Commission earned (£)',pounds(t.commission));if(commission===null)return;
+        const expense=prompt('Transaction expense (£)',pounds(t.purchaseExpense));if(expense===null)return;
+        const newExtra=pence(extra),newCommission=pence(commission),newExpense=pence(expense);
+        if(newCommission<t.commissionReceived)throw Error('Commission earned cannot be less than commission already received.');
+        if(confirm('Save these changes?'))change(d=>{const x=d.transactions.find(y=>y.id===tid);x.sources=sources;x.extra=newExtra;x.commission=newCommission;x.purchaseExpense=newExpense;});
+      }catch(err){alert(err.message);}
+    }
     if(b.dataset.action==='commission'&&t){
       const v=prompt('Commission received now (£), outstanding '+money(t.commission-t.commissionReceived));if(v===null)return;
       try{const n=pence(v);if(n<=0||n>t.commission-t.commissionReceived)throw Error('Enter a positive amount no greater than the outstanding commission.');change(d=>{d.transactions.find(x=>x.id===tid).commissionReceived+=n;});}catch(err){alert(err.message);}
@@ -222,7 +237,7 @@
   let invoiceId=null, invoiceFile=null;
   function openInvoice(tid){
     const t=data.transactions.find(x=>x.id===tid);if(!t)return;
-    invoiceId=tid;invoiceFile=null;$('invoiceFile').value='';$('scanRef').value=t.invoice.ref||'';$('scanTotal').value=t.invoice.total==null?'':pounds(t.invoice.total);$('scanText').value=t.invoice.text||'';$('ocrStatus').textContent='Select an invoice or enter the details manually.';invoiceCompare();$('invoiceDialog').showModal();
+    invoiceId=tid;invoiceFile=null;$('invoiceFile').value='';$('scanRef').value=t.invoice.ref||'';$('scanTotal').value=t.invoice.total==null?'':pounds(t.invoice.total);$('scanText').value=t.invoice.text||'';$('productsVerified').checked=!!t.invoice.productsVerified;$('ocrStatus').textContent='Select an invoice or enter the details manually.';invoiceCompare();$('invoiceDialog').showModal();
   }
   function invoiceCompare(){
     const t=data.transactions.find(x=>x.id===invoiceId);if(!t)return;
@@ -233,6 +248,12 @@
   $('scanRef').oninput=invoiceCompare;$('scanTotal').oninput=invoiceCompare;
   $('invoiceFile').onchange=e=>{invoiceFile=e.target.files[0]||null;$('ocrStatus').textContent=invoiceFile?'File selected: '+invoiceFile.name:'No invoice selected.';};
   $('closeInvoice').onclick=()=>$('invoiceDialog').close();
+  $('scanCodes').onclick=async()=>{
+    if(!invoiceFile||!invoiceFile.type.startsWith('image/')){alert('Select an image to scan.');return;}
+    if(!('BarcodeDetector' in window)){ $('ocrStatus').textContent='Barcode / QR detection is not supported by this browser. Check the code manually.';return; }
+    let bitmap;
+    try {bitmap=await createImageBitmap(invoiceFile);const codes=await new BarcodeDetector().detect(bitmap);$('ocrStatus').textContent=codes.length?'Code values (may be URLs or references, not invoice details): '+codes.map(c=>c.rawValue).join(' · '):'No barcode or QR code detected.';}catch(err){$('ocrStatus').textContent='Code scanning failed: '+err.message;}finally{if(bitmap)bitmap.close();}
+  };
   $('runOcr').onclick=async()=>{
     if(!invoiceFile||!invoiceFile.type.startsWith('image/')){alert('Select an image for OCR. PDF files can be attached and checked manually.');return;}
     if(!confirm('Download the OCR engine and language data from external servers? The selected image will be processed in this browser.'))return;
@@ -260,8 +281,9 @@
         if(invoiceFile.size>1500000)throw Error('Attachment exceeds 1.5 MB. Use a smaller file to protect browser storage.');
         file=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=()=>reject(Error('Could not read the file.'));reader.readAsDataURL(invoiceFile);});fileName=invoiceFile.name;
       }
-      const verification=total===null?'Awaiting verification':total===t.total?'Match':'Difference detected';
-      if(change(d=>{d.transactions.find(x=>x.id===invoiceId).invoice={ref,total,text:$('scanText').value,verification,file,fileName};})){$('invoiceDialog').close();$('notice').textContent='Invoice details approved. Total comparison only; verify products manually.';}
+      const productsVerified=$('productsVerified').checked;
+      const verification=total===null?'Awaiting verification':total!==t.total?'Difference detected':productsVerified?'Match':'Awaiting verification';
+      if(change(d=>{d.transactions.find(x=>x.id===invoiceId).invoice={ref,total,text:$('scanText').value,verification,productsVerified,file,fileName};})){$('invoiceDialog').close();$('notice').textContent='Invoice details approved. The original purchase plan was not changed.';}
     }catch(err){alert(err.message);}
   };
   add('phones',phoneTemplate);add('sources',sourceTemplate);render();drawTimer();

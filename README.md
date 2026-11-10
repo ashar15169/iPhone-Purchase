@@ -1,1 +1,21 @@
-# iPhone-Purchase
+# iPhone Purchase
+
+Independent personal purchase-management tool, not affiliated with Apple Inc. Open the root `index.html` through GitHub Pages on an iPhone. The app uses GBP and stores records locally in the browser.
+
+## Publishing
+
+1. In the repository, open **Settings → Pages**.
+2. Under **Build and deployment**, choose **Deploy from a branch**, select the branch containing these changes and the **/(root)** folder, then save.
+3. Wait for the Pages deployment and open the URL shown in Settings on your iPhone. The root `index.html` is the entry point.
+
+## Records and backups
+
+Export a JSON backup from Reports and save it somewhere private, such as iCloud Drive. JSON restore replaces the records in this browser; export first. CSV is a spreadsheet export, not a restorable backup. Browser-local data does not sync to another device and can disappear if Safari data is cleared. Attachments are included in JSON backups and increase storage use; the app limits each attachment to 1.5 MB. Do not commit backups, invoices or personal records to this public repository.
+
+The new app imports the previous `ipurchase_data` browser records once into the versioned `ipurchase_v2` store, leaving the original key untouched. Existing combined accessory totals remain combined, and missing balance acquisition costs remain unknown. Export a backup before updating. The old `Index.html` is retained for recovery, but changes made there after migration will not sync to the new app. Migration only works on the same origin and browser where the old data was saved.
+
+## Invoice privacy and limitations
+
+Invoice files stay in browser storage. Image OCR uses the existing Tesseract.js 5 CDN dependency and downloads its software and English language data only after confirmation; it processes the selected image locally. Internet access is needed for the download. PDF attachment and manual verification are supported, but PDF OCR is not implemented. Barcode/QR detection uses the browser's optional `BarcodeDetector` API and may not be available in iPhone Safari. Decoded values are not assumed to be invoice details. OCR suggestions can be incorrect and require manual review. Only the invoice total is compared automatically; product matching is a manual confirmation. Invoice approval never changes the original purchase plan.
+
+Estimated profit is not confirmed actual profit. Actual profit remains unavailable because receipt of extra amounts and all other cash flows is not separately confirmed. Unknown balance costs make profit incomplete. Payment exceptions are explicitly recorded rather than marked reconciled.
