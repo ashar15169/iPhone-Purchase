@@ -159,7 +159,7 @@
   }
   makeTimer('otherTimer','startOtherTimer','stopOtherTimer','resetOtherTimer');
   function lastTransactionTime() {
-    const times=data.transactions.map(t=>Date.parse(t.recordedAt || t.date)).filter(Number.isFinite);
+    const times=data.transactions.map(t=>{const recorded=Date.parse(t.recordedAt);return Number.isFinite(recorded)?recorded:Date.parse(t.date);}).filter(Number.isFinite);
     return times.length?times.reduce((latest,time)=>Math.max(latest,time)):null;
   }
   function drawLastTimer() {
@@ -167,7 +167,8 @@
     $('timer').textContent=last===null?'No transaction yet':duration(Math.max(0,Math.floor((Date.now()-last)/1000)));
     $('lastTransaction').textContent=last===null?'':'Last saved: '+new Date(last).toLocaleString('en-GB');
   }
-  setInterval(drawLastTimer,1000);
+  let displayedDay=today();
+  setInterval(()=>{drawLastTimer();if(today()!==displayedDay){displayedDay=today();renderDay();renderTransactions();}},1000);
   const setPurchaseTime=()=>{const now=new Date();now.setMinutes(now.getMinutes()-now.getTimezoneOffset());$('purchaseTime').value=now.toISOString().slice(0,16);};
   let purchaseTimeEdited=false;
   $('purchaseTime').addEventListener('input',()=>{purchaseTimeEdited=true;});
@@ -206,15 +207,14 @@
   const linkedExpenses = t => sum(data.expenses.filter(e=>e.transaction===t.id),e=>e.amount);
   function refundDeadline(t,a) {
     if(a.status==='Not refundable') return 'Not refundable';
-    if(a.status==='Returned, refund pending') return 'Returned · refund pending';
-    if(status(a)==='Fully refunded') return 'Fully refunded';
     if(a.expected<=0) return 'No refund expected';
     const purchase=new Date(t.date);
     const deadline=Date.UTC(purchase.getFullYear(),purchase.getMonth(),purchase.getDate()+14);
     const now=new Date(), current=Date.UTC(now.getFullYear(),now.getMonth(),now.getDate());
     const days=Math.round((deadline-current)/86400000);
     const date=new Intl.DateTimeFormat('en-GB',{timeZone:'UTC',day:'2-digit',month:'2-digit',year:'numeric'}).format(new Date(deadline));
-    return `Last date: ${date} · ${days<0?'Overdue by '+(-days)+' day(s)':days===0?'Due today':days+' day(s) remaining'}`;
+    const state=status(a)==='Fully refunded'?'Fully refunded':a.status==='Returned, refund pending'?'Returned · refund pending':days<0?'Overdue by '+(-days)+' day(s)':days===0?'Due today':days+' day(s) remaining';
+    return `Last date: ${date} · ${state}`;
   }
   function transactionHtml(t) {
     const f=figures(t), refund=sum(t.accessories,received), linked=linkedExpenses(t);
