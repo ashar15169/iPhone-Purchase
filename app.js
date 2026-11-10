@@ -78,9 +78,9 @@
     window.scrollTo(0,0);
   }
   document.querySelector('nav').addEventListener('click', e => { const b=e.target.closest('button[data-tab]'); if(b) switchTab(b.dataset.tab); });
-  const phoneTemplate = () => `<div class="item"><div class="compact-row"><label>iPhone model<input class="model" list="models" required placeholder="Model"></label><label>Unit price (£)<input class="price" type="number" min="0" step="0.01" required></label><button type="button" class="secondary danger remove" aria-label="Remove iPhone">×</button></div><details><summary>Quantity, colour and storage</summary><div class="fields"><label>Quantity<input class="qty" type="number" min="1" step="1" value="1" required></label><label>Colour<input class="colour"></label><label>Storage<input class="storage" placeholder="256 GB"></label></div></details><div class="lineTotal hint"></div></div>`;
+  const phoneTemplate = () => `<div class="item"><div class="compact-row"><label>iPhone model<input class="model" list="models" required placeholder="Model"></label><label>Unit price (£)<input class="price" type="number" min="0" step="0.01" required></label><button type="button" class="secondary danger remove" aria-label="Remove iPhone">×</button></div><div class="fields"><label>Storage (GB)<input class="storage" placeholder="256 GB"></label><label>Colour<input class="colour"></label><label>Quantity<input class="qty" type="number" min="1" step="1" value="1" required></label></div><div class="lineTotal hint"></div></div>`;
   const accessoryTemplate = () => `<div class="item"><div class="compact-row"><label>Accessory<input class="name" required placeholder="Product"></label><label>Unit price (£)<input class="price" type="number" min="0" step="0.01" required></label><button type="button" class="secondary danger remove" aria-label="Remove accessory">×</button></div><details><summary>Quantity and refund details</summary><div class="fields"><label>Quantity<input class="qty" type="number" min="1" step="1" value="1" required></label><label>Expected refund (£)<input class="expected" type="number" min="0" step="0.01" value="0" required></label><label>Return status<select class="status"><option>Not yet returned</option><option>Awaiting return</option><option>Not refundable</option></select></label></div></details><div class="lineTotal hint"></div></div>`;
-  const sourceTemplate = () => `<div class="item"><div class="compact-row"><label>Apple ID balance (£)<input class="face" type="number" min="0" step="0.01" value="0" required></label><label>Acquisition rate (%)<input class="rate" type="number" min="0" max="100" step="0.01" value="85"></label><button type="button" class="secondary danger remove" aria-label="Remove balance">×</button></div><div class="lineTotal hint"></div></div>`;
+  const sourceTemplate = () => `<div class="item"><div class="source-row"><label>Apple ID balance (£)<input class="face" type="number" min="0" step="0.01" value="0" required></label><button type="button" class="secondary danger remove" aria-label="Remove balance">×</button></div></div>`;
   $('phones').insertAdjacentHTML('beforebegin','<datalist id="models"><option value="iPhone 18 Pro"><option value="iPhone 18 Pro Max"><option value="iPhone 18"><option value="iPhone Air"></datalist>');
   const add = (container, template) => { $(container).insertAdjacentHTML('beforeend',template()); updatePlanner(); };
   $('addPhone').onclick=()=>add('phones',phoneTemplate);
@@ -109,7 +109,7 @@
     const quantity = value => { const n=Number(value); if(!Number.isSafeInteger(n)||n<1||n>10000) throw Error('Quantity must be a whole number from 1 to 10,000.'); return n; };
     const phones=rows('phones').map(el=>{ const qty=quantity(q(el,'qty')), unit=pence(q(el,'price')); return {model:q(el,'model'),colour:q(el,'colour'),storage:q(el,'storage'),qty,unit,total:qty*unit}; });
     const accessories=rows('accessories').map(el=>{ const qty=quantity(q(el,'qty')),unit=pence(q(el,'price')),expected=pence(q(el,'expected')); return {id:id(),name:q(el,'name'),qty,unit,total:qty*unit,expected,status:q(el,'status'),refunds:[]}; });
-    const sources=rows('sources').map(el=>{const face=pence(q(el,'face')), r=q(el,'rate'); let rate=null,cost=null; if(r!==''){ if(!/^\d+(?:\.\d{1,2})?$/.test(r)||Number(r)>100) throw Error('Acquisition rate must be between 0 and 100%.'); rate=Math.round(Number(r)*100); cost=Math.round(face*rate/10000); } return {face,rate,cost}; });
+    const sources=rows('sources').map(el=>({face:pence(q(el,'face')),rate:null,cost:null}));
     return {phones,accessories,sources,cash:pence($('cash').value),debit:pence($('debit').value),credit:pence($('credit').value),extra:pence($('extra').value),commission:pence($('commission').value),commissionReceived:pence($('commissionReceived').value),purchaseExpense:pence($('purchaseExpense').value)};
   }
   const sum = (arr,fn) => arr.reduce((s,x)=>s+fn(x),0);
@@ -118,6 +118,14 @@
     const unknown=t.sources.some(s=>s.cost===null && s.face>0), cost=sum(t.sources,s=>s.cost||0), saving=face-cost;
     const refunds=sum(t.accessories,a=>a.expected), payments=face+t.cash+t.debit+t.credit, total=phone+accessory;
     return {phone,accessory,face,unknown,cost,saving,refunds,payments,total,profit:saving+t.extra+t.commission-t.purchaseExpense, outflow:cost+t.cash+t.debit+t.credit-refunds};
+  }
+  function cashInHand() {
+    const count=data.cashCount;
+    if(!count || localDate(count.date)!==today()) return null;
+    const after=date=>typeof date==='string' && !isNaN(Date.parse(date)) && Date.parse(date)>=Date.parse(count.date);
+    const spent=sum(data.transactions.filter(t=>after(t.recordedAt)),t=>t.cash);
+    const returned=sum(data.transactions,t=>sum(t.accessories,a=>sum(a.refunds.filter(r=>r.method==='cash' && after(r.date)),r=>r.amount)));
+    return count.amount-spent+returned;
   }
   function updatePlanner() {
     const rows = id => [...$(id).querySelectorAll('.item')];
@@ -130,17 +138,14 @@
       const other=sum(['cash','debit','credit'].filter(key=>key!==auto),key=>safeAmount($(key).value));
       $(auto).value=pounds(Math.max(0,phone+accessory-face-other));
     }
-    $('plannerTotals').innerHTML=metric('iPhones',money(phone))+metric('Accessories',money(accessory))+metric('Total',money(phone+accessory))+metric('Apple ID',money(face))+metric('Cash',money(safeAmount($('cash').value)))+metric('Card',money(safeAmount($('debit').value)+safeAmount($('credit').value)));
+    const cash=cashInHand(), nonRefundable=safeAmount($('extra').value);
+    $('plannerTotals').innerHTML=metric('iPhones',money(phone))+metric('Accessories',money(accessory))+metric('Invoice total',money(phone+accessory))+metric('Non-refundable',money(nonRefundable))+metric('Total incl. non-refundable',money(phone+accessory+nonRefundable))+metric('Apple ID',money(face))+metric('Cash payment',money(safeAmount($('cash').value)))+metric('Card payment',money(safeAmount($('debit').value)+safeAmount($('credit').value)))+metric('Cash before',cash===null?'Not counted':money(cash))+metric('Cash after purchase',cash===null?'Not counted':money(cash-safeAmount($('cash').value)));
     try {
       const t=readPlanner(), f=figures(t);
-      $('breakdown').innerHTML=line('iPhones',money(f.phone))+line('Accessories',money(f.accessory))+line('Invoice total',money(f.total))+line('Apple Account face value',money(f.face))+line('Cash',money(t.cash))+line('Card payments',money(t.debit+t.credit))+line('Total payments',money(f.payments))+line('Invoice less payments',money(f.total-f.payments),f.total!==f.payments?'warning':'good')+line('Acquisition cost',f.unknown?'Incomplete — unknown cost':money(f.cost))+line('Acquisition savings',f.unknown?'Incomplete — unknown cost':money(f.saving))+line('Extra non-refundable amount',money(t.extra))+line('Commission earned / outstanding',money(t.commission)+' / '+money(t.commission-t.commissionReceived))+line('Transaction expenses',money(t.purchaseExpense))+line('Estimated profit',f.unknown?'Incomplete — unknown cost':money(f.profit))+line('Expected accessory refunds',money(f.refunds))+line('Expected net outflow',f.unknown?'Incomplete — unknown cost':money(f.outflow));
-      const source=t.sources[0];
-      const rates=[80,85,90,95,100];if(source&&source.rate!==null&&!rates.includes(source.rate/100))rates.push(source.rate/100);rates.sort((a,b)=>a-b);
-      $('comparison').innerHTML=source ? '<h4>Rate comparison for first source</h4>'+rates.map(r=>line(r+'%'+(source.rate===r*100?' (selected)':''),money(Math.round(source.face*r/100))+' cost · '+money(source.face-Math.round(source.face*r/100))+' saving'+(source.cost!==null?' · '+money((source.face-Math.round(source.face*r/100))-(source.face-source.cost))+' vs selected':''))).join(''):'';
+      $('breakdown').innerHTML=line('iPhones',money(f.phone))+line('Accessories',money(f.accessory))+line('Invoice total',money(f.total))+line('Non-refundable amount (separate)',money(t.extra))+line('Total including non-refundable',money(f.total+t.extra))+line('Apple ID',money(f.face))+line('Cash',money(t.cash))+line('Card payments',money(t.debit+t.credit))+line('Total payments',money(f.payments))+line('Invoice less payments',money(f.total-f.payments),f.total!==f.payments?'warning':'good')+line('Commission earned / outstanding',money(t.commission)+' / '+money(t.commission-t.commissionReceived))+line('Transaction expenses',money(t.purchaseExpense))+line('Expected accessory refunds',money(f.refunds));
       [...$('phones').querySelectorAll('.item')].forEach((el,i)=>el.querySelector('.lineTotal').textContent='Line total: '+money(t.phones[i].total));
       [...$('accessories').querySelectorAll('.item')].forEach((el,i)=>el.querySelector('.lineTotal').textContent='Line total: '+money(t.accessories[i].total));
-      [...$('sources').querySelectorAll('.item')].forEach((el,i)=>{const s=t.sources[i];el.querySelector('.lineTotal').textContent=s.cost===null?'Acquisition cost and savings unknown':'Cost: '+money(s.cost)+' · Savings: '+money(s.face-s.cost);});
-    } catch(e) { $('comparison').innerHTML=''; $('breakdown').textContent='Complete all amounts to see the breakdown. '+e.message; }
+    } catch(e) { $('breakdown').textContent='Complete all amounts to see the breakdown. '+e.message; }
   }
   const duration=s=>[Math.floor(s/3600),Math.floor(s%3600/60),s%60].map(n=>String(n).padStart(2,'0')).join(':');
   function makeTimer(display,start,stop,reset) {
@@ -152,10 +157,22 @@
     $(reset).onclick=()=>{started=null;elapsed=0;clearInterval(interval);draw();};
     return seconds;
   }
-  const seconds=makeTimer('timer','startTimer','stopTimer','resetTimer');
   makeTimer('otherTimer','startOtherTimer','stopOtherTimer','resetOtherTimer');
+  function lastTransactionTime() {
+    const times=data.transactions.map(t=>Date.parse(t.recordedAt || t.date)).filter(Number.isFinite);
+    return times.length?times.reduce((latest,time)=>Math.max(latest,time)):null;
+  }
+  function drawLastTimer() {
+    const last=lastTransactionTime();
+    $('timer').textContent=last===null?'No transaction yet':duration(Math.max(0,Math.floor((Date.now()-last)/1000)));
+    $('lastTransaction').textContent=last===null?'':'Last saved: '+new Date(last).toLocaleString('en-GB');
+  }
+  setInterval(drawLastTimer,1000);
   const setPurchaseTime=()=>{const now=new Date();now.setMinutes(now.getMinutes()-now.getTimezoneOffset());$('purchaseTime').value=now.toISOString().slice(0,16);};
+  let purchaseTimeEdited=false;
+  $('purchaseTime').addEventListener('input',()=>{purchaseTimeEdited=true;});
   setPurchaseTime();
+  const purchaseMessage=t=>`Done with ${money(t.extra)}\nApple ID used: ${money(sum(t.sources,s=>s.face))}\nInvoice total: ${money(t.total)}\nTotal including non-refundable: ${money(t.total+t.extra)}`;
   let completedId=null;
   $('purchaseForm').onsubmit=e=>{
     e.preventDefault();
@@ -165,12 +182,14 @@
       if(t.accessories.some(a=>!a.name||a.expected>a.total||(a.status==='Not refundable'&&a.expected!==0))) throw Error('Check accessory names and expected refunds; non-refundable items must have a zero expected refund.');
       if(t.commissionReceived>t.commission) throw Error('Commission received cannot exceed commission earned.');
       if(f.total!==f.payments && !$('exception').checked) throw Error('Payments do not reconcile. Correct them or explicitly record an exception.');
-      if(!confirm(`Complete purchase?\nInvoice: ${money(f.total)}\nPayments: ${money(f.payments)}\nDifference: ${money(f.total-f.payments)}\nEstimated profit: ${f.unknown?'Incomplete':money(f.profit)}${f.total!==f.payments?'\nPayment exception will be recorded.':''}`)) return;
+      if(!confirm(`Add transaction?\nInvoice: ${money(f.total)}\nNon-refundable (separate): ${money(t.extra)}\nPayments: ${money(f.payments)}\nDifference: ${money(f.total-f.payments)}${f.total!==f.payments?'\nPayment exception will be recorded.':''}`)) return;
+      if(!purchaseTimeEdited) setPurchaseTime();
       const purchaseDate=new Date($('purchaseTime').value);if(isNaN(purchaseDate.getTime())) throw Error('Enter a valid purchase time.');
-      Object.assign(t,{id:id(),date:purchaseDate.toISOString(),recordedAt:new Date().toISOString(),total:f.total,exception:f.total!==f.payments,invoice:{ref:'',verification:'Awaiting verification'},duration:seconds()});
+      const last=lastTransactionTime(), now=Date.now();
+      Object.assign(t,{id:id(),date:purchaseDate.toISOString(),recordedAt:new Date(now).toISOString(),total:f.total,exception:f.total!==f.payments,invoice:{ref:'',verification:'Awaiting verification'},duration:last===null?null:Math.max(0,Math.floor((now-last)/1000))});
       if(!change(d=>d.transactions.push(t))) return;
-      completedId=t.id; $('completionMessage').textContent='Done with '+money(t.extra); $('completion').showModal();
-      e.target.reset(); previousAuto='cash'; setPurchaseTime(); $('phones').innerHTML='';$('accessories').innerHTML='';$('sources').innerHTML='';add('phones',phoneTemplate);add('sources',sourceTemplate);$('resetTimer').click(); updatePlanner();
+      completedId=t.id; $('completionMessage').textContent=purchaseMessage(t); $('completion').showModal();
+      e.target.reset(); previousAuto='cash'; purchaseTimeEdited=false; setPurchaseTime(); $('phones').innerHTML='';$('accessories').innerHTML='';$('sources').innerHTML='';add('phones',phoneTemplate);add('sources',sourceTemplate);updatePlanner();
     } catch(err){alert(err.message);}
   };
   async function copyText(text) {
@@ -185,19 +204,31 @@
   $('expenseForm').onsubmit=e=>{e.preventDefault();try{const amount=pence($('expenseAmount').value),ref=$('expenseTransaction').value.trim();if(!amount)throw Error('Enter a positive expense.');if(ref&&!data.transactions.some(t=>t.id===ref))throw Error('Transaction reference not found.');const expense={id:id(),date:$('expenseDate').value,description:$('expenseDescription').value.trim(),category:$('expenseCategory').value.trim(),amount,transaction:ref};if(!expense.description||!expense.category)throw Error('Enter description and category.');if(change(d=>d.expenses.push(expense))){e.target.reset();$('expenseDate').value=today();}}catch(err){alert(err.message);}};
   const action=(name,tid,label,extra='')=>`<button class="secondary" data-action="${name}" data-id="${esc(tid)}" ${extra}>${esc(label)}</button>`;
   const linkedExpenses = t => sum(data.expenses.filter(e=>e.transaction===t.id),e=>e.amount);
+  function refundDeadline(t,a) {
+    if(a.status==='Not refundable') return 'Not refundable';
+    if(a.status==='Returned, refund pending') return 'Returned · refund pending';
+    if(status(a)==='Fully refunded') return 'Fully refunded';
+    if(a.expected<=0) return 'No refund expected';
+    const purchase=new Date(t.date);
+    const deadline=Date.UTC(purchase.getFullYear(),purchase.getMonth(),purchase.getDate()+14);
+    const now=new Date(), current=Date.UTC(now.getFullYear(),now.getMonth(),now.getDate());
+    const days=Math.round((deadline-current)/86400000);
+    const date=new Intl.DateTimeFormat('en-GB',{timeZone:'UTC',day:'2-digit',month:'2-digit',year:'numeric'}).format(new Date(deadline));
+    return `Last date: ${date} · ${days<0?'Overdue by '+(-days)+' day(s)':days===0?'Due today':days+' day(s) remaining'}`;
+  }
   function transactionHtml(t) {
     const f=figures(t), refund=sum(t.accessories,received), linked=linkedExpenses(t);
-    return `<article class="item record"><h3>${esc(t.phones.map(p=>p.model+' × '+p.qty).join(', '))}</h3><p class="hint">Reference: ${esc(t.id)}<br>${esc(new Date(t.date).toLocaleString('en-GB'))} · ${esc(t.invoice.verification || 'Awaiting verification')}${t.exception?' · ⚠️ Payment exception':''}</p>
+    return `<tr><td>${esc(new Date(t.date).toLocaleString('en-GB'))}</td><td>${t.phones.map(p=>esc([p.model,p.storage,p.colour].filter(Boolean).join(' · ')+' × '+p.qty)+'<br>'+esc(money(p.total))).join('<br>')}</td><td>${t.accessories.length?t.accessories.map(a=>esc(a.name+' × '+a.qty)+'<br>'+esc(money(a.total))).join('<br>'):'—'}</td><td>${t.accessories.length?t.accessories.map(a=>esc(a.name)+': '+esc(refundDeadline(t,a))).join('<br>'):'—'}</td><td>${esc(money(t.total))}<br>Apple ID ${esc(money(f.face))}<br>Cash ${esc(money(t.cash))}<br>Card ${esc(money(t.debit+t.credit))}<br>Non-refundable ${esc(money(t.extra))}</td><td><details><summary>Details &amp; actions</summary><article class="record"><p class="hint">Reference: ${esc(t.id)}<br>${esc(t.invoice.verification || 'Awaiting verification')}${t.exception?' · ⚠️ Payment exception':''}</p>
     ${t.phones.map(p=>line(p.model+' · '+p.colour+' · '+p.storage+' × '+p.qty,money(p.total))).join('')}
     ${line('Invoice total',money(t.total))}${line('Apple Account / cash / cards',money(f.face)+' / '+money(t.cash)+' / '+money(t.debit+t.credit))}${line('Expected / received refunds',money(f.refunds)+' / '+money(refund))}${line('Extra non-refundable amount',money(t.extra))}${line('Commission earned / received',money(t.commission)+' / '+money(t.commissionReceived))}${line('Estimated profit',f.unknown?'Incomplete — unknown acquisition cost':money(f.profit-linked))}${line('Actual profit','Unavailable — receipts not fully confirmed')}
-    <div class="actions">${action('invoice',t.id,'Verify / attach invoice')}${t.invoice.file?action('viewInvoice',t.id,'View attachment'):''}${action('edit',t.id,'Edit earnings / balance costs')}${action('copy',t.id,'Copy message')}${t.commissionReceived<t.commission?action('commission',t.id,'Record commission received'):''}${action('delete',t.id,'Delete')}</div></article>`;
+    <div class="actions">${action('invoice',t.id,'Verify / attach invoice')}${t.invoice.file?action('viewInvoice',t.id,'View attachment'):''}${action('edit',t.id,'Edit earnings')}${action('copy',t.id,'Copy message')}${t.commissionReceived<t.commission?action('commission',t.id,'Record commission received'):''}${action('delete',t.id,'Delete')}</div></article></details></td></tr>`;
   }
   function renderTransactions() {
     const ts=data.transactions, td=today(), todays=ts.filter(t=>localDate(t.date)===td);
     $('transactionStats').innerHTML=metric('iPhones today',String(sum(todays,t=>sum(t.phones,p=>p.qty))))+metric('Lifetime iPhones',String(sum(ts,t=>sum(t.phones,p=>p.qty))))+metric('Purchase value today',money(sum(todays,t=>t.total)))+metric('Lifetime purchase value',money(sum(ts,t=>t.total)));
     const search=$('search').value.toLowerCase(),date=$('filterDate').value,model=$('filterModel').value.toLowerCase(),refund=$('filterRefund').value,verification=$('filterVerification').value;
     const filtered=ts.filter(t=>(!search||(t.id+' '+t.phones.map(p=>p.model).join(' ')+' '+(t.invoice.ref||'')).toLowerCase().includes(search))&&(!date||localDate(t.date)===date)&&(!model||t.phones.some(p=>p.model.toLowerCase().includes(model)))&&(!refund||t.accessories.some(a=>status(a)===refund))&&(!verification||(t.invoice.verification||'Awaiting verification')===verification));
-    $('transactionList').innerHTML=filtered.length?[...filtered].reverse().map(transactionHtml).join(''):'<p class="hint">No matching transactions.</p>';
+    $('transactionList').innerHTML=filtered.length?'<div class="table-wrap"><table><thead><tr><th>Date &amp; time</th><th>iPhone</th><th>Accessories</th><th>Accessory return deadline</th><th>Amounts</th><th>Details</th></tr></thead><tbody>'+[...filtered].sort((a,b)=>Date.parse(b.date)-Date.parse(a.date)).map(transactionHtml).join('')+'</tbody></table></div>':'<p class="hint">No matching transactions.</p>';
   }
   function renderRefunds() {
     const all=data.transactions.flatMap(t=>t.accessories.map(a=>({t,a})));
@@ -220,24 +251,17 @@
     }
     const dayCommission=sum(ts.filter(t=>localDate(t.date)===d),t=>t.commission);
     const dayExpenses=sum(data.expenses.filter(e=>e.date===d),e=>e.amount)+sum(ts.filter(t=>localDate(t.date)===d),t=>t.purchaseExpense);
-    $('reportStats').innerHTML=metric('Commission earned',money(commission))+metric('Commission received',money(commReceived))+metric('Commission outstanding',money(commission-commReceived))+metric('Extra amounts today',money(sum(ts.filter(t=>localDate(t.date)===d),t=>t.extra)))+metric('Extra amounts recorded',money(extra))+metric('Apple Account face value',money(face))+metric('Known acquisition cost',money(cost)+(unknown?' + unknown':''))+metric('Known savings',money(knownFace-cost)+(unknown?' + unknown':''))+metric('Average known acquisition rate',knownFace?(cost/knownFace*100).toFixed(2)+'%':'Unavailable')+metric('Total expenses',money(expenses))+metric('Daily net earnings (commission − expenses)',money(dayCommission-dayExpenses))+metric('Daily estimated profit',profitFor(x=>x===d))+metric('Weekly estimated profit',profitFor(x=>x>=weekStart&&x<=d))+metric('Monthly estimated profit',profitFor(x=>x.slice(0,7)===month))+metric('Lifetime estimated profit',profitFor(()=>true))+metric('Confirmed actual profit','Unavailable');
+    $('reportStats').innerHTML=metric('Commission earned',money(commission))+metric('Commission received',money(commReceived))+metric('Commission outstanding',money(commission-commReceived))+metric('Extra amounts today',money(sum(ts.filter(t=>localDate(t.date)===d),t=>t.extra)))+metric('Extra amounts recorded',money(extra))+metric('Apple Account face value',money(face))+metric('Known acquisition cost',money(cost)+(unknown?' + unknown':''))+metric('Known savings',money(knownFace-cost)+(unknown?' + unknown':''))+metric('Total expenses',money(expenses))+metric('Daily net earnings (commission − expenses)',money(dayCommission-dayExpenses))+metric('Daily estimated profit',profitFor(x=>x===d))+metric('Weekly estimated profit',profitFor(x=>x>=weekStart&&x<=d))+metric('Monthly estimated profit',profitFor(x=>x.slice(0,7)===month))+metric('Lifetime estimated profit',profitFor(()=>true))+metric('Confirmed actual profit','Unavailable');
     $('expenseList').innerHTML=data.expenses.length?'<h3>Recorded expenses</h3>'+[...data.expenses].reverse().map(e=>`<div class="item">${esc(e.date)} · ${esc(e.description)} · ${esc(e.category||'')} · ${money(e.amount)}${e.transaction?' · '+esc(e.transaction):''}<div class="actions">${action('deleteExpense',e.id,'Delete expense')}</div></div>`).join(''):'';
-    const durations=ts.map(t=>t.duration).filter(n=>Number.isFinite(n));
-    $('timerStats').textContent=durations.length?'Last: '+duration(durations[durations.length-1])+(durations.length>1?' · Average: '+duration(Math.round(sum(durations,x=>x)/durations.length)):''):'No purchase sessions recorded yet.';
   }
   function renderDay() {
-    const ts=data.transactions, day=today(), count=data.cashCount;
+    const ts=data.transactions, day=today();
     const phones=sum(ts.filter(t=>localDate(t.date)===day),t=>sum(t.phones,p=>p.qty));
     const accessories=ts.flatMap(t=>t.accessories.map(a=>({t,a})));
     const inHand=sum(accessories.filter(({a})=>a.status!=='Returned, refund pending' && status(a)!=='Fully refunded'),x=>x.a.qty);
-    let cash='Not counted today';
-    if(count && localDate(count.date)===day) {
-      const after=date=>typeof date==='string' && !isNaN(Date.parse(date)) && Date.parse(date)>=Date.parse(count.date);
-      const spent=sum(ts.filter(t=>after(t.recordedAt)),t=>t.cash);
-      const returned=sum(accessories,x=>sum(x.a.refunds.filter(r=>r.method==='cash' && after(r.date)),r=>r.amount));
-      cash=money(count.amount-spent+returned);
-    }
-    $('dayStats').innerHTML=metric('iPhones purchased today',String(phones))+metric('Accessories in hand',String(inHand))+metric('Cash in hand',cash);
+    const cash=cashInHand();
+    $('dayStats').innerHTML=metric('iPhones purchased today',String(phones))+metric('Accessories in hand',String(inHand))+metric('Cash in hand',cash===null?'Not counted today':money(cash));
+    updatePlanner();
     const select=$('refundAccessory'), selected=select.value;
     const eligible=accessories.filter(({a})=>a.status!=='Not refundable' && outstanding(a)>0);
     select.replaceChildren(new Option('Select an accessory',''));
@@ -260,24 +284,22 @@
     if(!confirm('Record '+money(amount)+' received in cash and mark '+a.name+' returned?')) return;
     change(d=>{const item=d.transactions.find(x=>x.id===tid).accessories.find(x=>x.id===aid);item.status='Returned, refund pending';item.returnDate=today();item.refunds.push({amount,date:new Date().toISOString(),method:'cash'});});
   };
-  function render(){renderTransactions();renderRefunds();renderReports();renderDay();}
+  function render(){renderTransactions();renderRefunds();renderReports();renderDay();drawLastTimer();}
   ['search','filterDate','filterModel','filterRefund','filterVerification'].forEach(x=>$(x).addEventListener('input',renderTransactions));
   document.addEventListener('click',e=>{
     const b=e.target.closest('button[data-action]');if(!b)return;
     const tid=b.dataset.id,t=data.transactions.find(x=>x.id===tid), a=t&&t.accessories.find(x=>x.id===b.dataset.accessory);
     if(b.dataset.action==='delete'){if(confirm('Delete this transaction and its refund history?'))change(d=>{d.transactions=d.transactions.filter(x=>x.id!==tid);});}
     if(b.dataset.action==='deleteExpense'){if(confirm('Delete this expense?'))change(d=>{d.expenses=d.expenses.filter(x=>x.id!==tid);});}
-    if(b.dataset.action==='copy'&&t){const text='Done with '+money(t.extra);copyText(text).then(ok=>{if(ok)alert('Message copied.');else prompt('Copy this message:',text);});}
+    if(b.dataset.action==='copy'&&t){const text=purchaseMessage(t);copyText(text).then(ok=>{if(ok)alert('Message copied.');else prompt('Copy this message:',text);});}
     if(b.dataset.action==='edit'&&t){
       try{
-        const sources=structuredCopy(t.sources);
-        for(const s of sources){const rate=prompt('Acquisition rate (%) for '+money(s.face)+' face value. Leave blank if unknown.',s.rate===null?'':String(s.rate/100));if(rate===null)return;if(rate.trim()===''){s.rate=null;s.cost=null;}else{if(!/^\d+(?:\.\d{1,2})?$/.test(rate.trim())||Number(rate)>100)throw Error('Rate must be between 0 and 100%.');s.rate=Math.round(Number(rate)*100);s.cost=Math.round(s.face*s.rate/10000);}}
         const extra=prompt('Extra non-refundable amount (£)',pounds(t.extra));if(extra===null)return;
         const commission=prompt('Commission earned (£)',pounds(t.commission));if(commission===null)return;
         const expense=prompt('Transaction expense (£)',pounds(t.purchaseExpense));if(expense===null)return;
         const newExtra=pence(extra),newCommission=pence(commission),newExpense=pence(expense);
         if(newCommission<t.commissionReceived)throw Error('Commission earned cannot be less than commission already received.');
-        if(confirm('Save these changes?'))change(d=>{const x=d.transactions.find(y=>y.id===tid);x.sources=sources;x.extra=newExtra;x.commission=newCommission;x.purchaseExpense=newExpense;});
+        if(confirm('Save these changes?'))change(d=>{const x=d.transactions.find(y=>y.id===tid);x.extra=newExtra;x.commission=newCommission;x.purchaseExpense=newExpense;});
       }catch(err){alert(err.message);}
     }
     if(b.dataset.action==='commission'&&t){
@@ -357,5 +379,5 @@
     }catch(err){alert(err.message);}
   };
   add('phones',phoneTemplate);add('sources',sourceTemplate);render();
-  window.addEventListener('focus',renderDay);
+  window.addEventListener('focus',()=>{renderDay();renderTransactions();drawLastTimer();});
 })();
