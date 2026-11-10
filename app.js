@@ -87,7 +87,12 @@
   $('addAccessory').onclick=()=>add('accessories',accessoryTemplate);
   $('addSource').onclick=()=>add('sources',sourceTemplate);
   $('purchaseForm').addEventListener('click',e=>{ if(e.target.classList.contains('remove')) {e.target.closest('.item').remove(); updatePlanner();} });
+  let previousAuto='cash';
   $('purchaseForm').addEventListener('input',e=>{
+    if(e.target.id==='autoPayment') {
+      if(previousAuto && e.target.value) $(previousAuto).value='0';
+      previousAuto=e.target.value;
+    }
     const row=e.target.closest('#accessories .item');
     if(row) {
       if(e.target.classList.contains('expected')) row.dataset.refundEdited='yes';
@@ -165,7 +170,7 @@
       Object.assign(t,{id:id(),date:purchaseDate.toISOString(),recordedAt:new Date().toISOString(),total:f.total,exception:f.total!==f.payments,invoice:{ref:'',verification:'Awaiting verification'},duration:seconds()});
       if(!change(d=>d.transactions.push(t))) return;
       completedId=t.id; $('completionMessage').textContent='Done with '+money(t.extra); $('completion').showModal();
-      e.target.reset(); setPurchaseTime(); $('phones').innerHTML='';$('accessories').innerHTML='';$('sources').innerHTML='';add('phones',phoneTemplate);add('sources',sourceTemplate);$('resetTimer').click(); updatePlanner();
+      e.target.reset(); previousAuto='cash'; setPurchaseTime(); $('phones').innerHTML='';$('accessories').innerHTML='';$('sources').innerHTML='';add('phones',phoneTemplate);add('sources',sourceTemplate);$('resetTimer').click(); updatePlanner();
     } catch(err){alert(err.message);}
   };
   async function copyText(text) {
@@ -235,7 +240,8 @@
     $('dayStats').innerHTML=metric('iPhones purchased today',String(phones))+metric('Accessories in hand',String(inHand))+metric('Cash in hand',cash);
     const select=$('refundAccessory'), selected=select.value;
     const eligible=accessories.filter(({a})=>a.status!=='Not refundable' && outstanding(a)>0);
-    select.innerHTML='<option value="">Select an accessory</option>'+eligible.map(({t,a})=>`<option value="${esc(JSON.stringify([t.id,a.id]))}">${esc(a.name)} × ${a.qty} · ${esc(money(outstanding(a)))} · ${esc(new Date(t.date).toLocaleDateString('en-GB'))}</option>`).join('');
+    select.replaceChildren(new Option('Select an accessory',''));
+    eligible.forEach(({t,a})=>select.add(new Option(`${a.name} × ${a.qty} · ${money(outstanding(a))} · ${new Date(t.date).toLocaleDateString('en-GB')}`,JSON.stringify([t.id,a.id]))));
     select.value=[...select.options].some(o=>o.value===selected)?selected:'';
   }
   $('saveOpening').onclick=()=>{
